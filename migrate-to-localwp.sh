@@ -1,6 +1,21 @@
 #!/bin/bash
 
-# Usage: ./migrate-to-localwp.sh <ssh-user> <ssh-host> <public-path> --ssh-copy-id
+usage() {
+cat << EOF
+
+Usage: $0 [ -c ] ssh-user ssh-host public-path
+Package WordPress site files and database into a zip file.
+
+-c           Automatically copy public key to remote server
+
+ssh-user     SSH user to connect to remote server
+
+ssh-host     SSH host to connect to remote server
+
+public-path  Path to WordPress public directory on remote server
+
+EOF
+}
 
 assert_command_exists() {
     if ! command -v "$1" > /dev/null; then
@@ -14,29 +29,34 @@ check_ssh() {
     ssh -o BatchMode=yes -o ConnectTimeout=5 "$1" "exit" 2> /dev/null
 }
 
+# Parse command line options
+while getopts 'c' OPTION
+do
+  case "${OPTION}" in
+    c) SSH_COPY_ID=1;;
+    *) usage
+       exit 1
+       ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# Assert all arguments are present
+if [ "$#" -ne 3 ]; then
+    usage
+    exit 1
+fi
+
 # Create some whitespace
 echo ""
 echo ""
 
-# Assert all arguments are present
-if [ $# -lt 3 ]; then
-    echo "Usage: ./migrate-to-localwp.sh <ssh-user> <ssh-host> <public-path> --ssh-copy-id"
-    exit 1
-fi
-
 # Assert that all required commands are installed
-REQUIRED_COMMANDS=(ssh rsync zip echo cut grep mktemp pwd cd)
+REQUIRED_COMMANDS=(ssh rsync zip echo cut grep mkdir mktemp pwd cd)
 for COMMAND in "${REQUIRED_COMMANDS[@]}"
 do
     assert_command_exists "$COMMAND"
 done
-
-# Get the optional --ssh-copy-id flag
-if [ "$4" == "--ssh-copy-id" ]; then
-    SSH_COPY_ID=true
-else
-    SSH_COPY_ID=false
-fi
 
 # Set variables
 SSH_USER=$1
@@ -50,9 +70,9 @@ PATH_TO_WP_CONFIG="$PUBLIC_PATH/wp-config.php"
 check_ssh "$SSH_LOGIN"
 CAN_SSH_IN=$?
 
-# If the --ssh-copy-id flag is set, copy the public key to the remote server and try again
+# If the -c (ssh-copy-id) flag is set, copy the public key to the remote server and try again
 if [ "$CAN_SSH_IN" -ne 0 ]; then
-  if [ "$SSH_COPY_ID" = true ]; then
+  if [ "$SSH_COPY_ID" = 1 ]; then
       assert_command_exists ssh-copy-id
       echo "Copying public key to $SSH_LOGIN"
       ssh-copy-id "$SSH_LOGIN" > /dev/null 2>&1
