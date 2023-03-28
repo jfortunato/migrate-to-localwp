@@ -125,7 +125,7 @@ ssh "$SSH_LOGIN" "mysqldump --no-tablespaces -u $DB_USER -p$DB_PASSWORD $DB_NAME
 # Now zip up the temporary directory and place it in the working directory
 WORKDIR=$(pwd)
 cd "$TMP_DIR" || exit
-echo "Zipping files to $WORKDIR/migrate-to-localwp-$SSH_USER.zip"
+echo "Zipping files and putting everything in the current directory"
 zip -r -q "$WORKDIR/migrate-to-localwp-$SSH_USER.zip" .
 cd "$WORKDIR" || exit
 
