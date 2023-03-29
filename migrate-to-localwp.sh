@@ -195,7 +195,8 @@ if [ -n "$PUBLIC_URL" ]; then
 
     # Generate the JSON file
     echo "Generating JSON file"
-    echo "$JSON" > "$TMP_DIR/migrate-to-localwp.json"
+    # File must be named wpmigrate-export.json for Local to recognize it
+    echo "$JSON" > "$TMP_DIR/wpmigrate-export.json"
 fi
 
 # Now zip up the temporary directory and place it in the working directory
