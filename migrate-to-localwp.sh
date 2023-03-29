@@ -3,10 +3,13 @@
 usage() {
 cat << EOF
 
-Usage: $0 [ -c ] ssh-user ssh-host public-path
+Usage: $0 [ -c ] [ -u url ] ssh-user ssh-host public-path
 Package WordPress site files and database into a zip file.
 
--c           Automatically copy public key to remote server
+-c           Automatically copy public key to remote server using ssh-copy-id
+
+-u           The public url of the site. This optional flag is used to generate a phpinfo file that can
+             automatically detect some site settings.
 
 ssh-user     SSH user to connect to remote server
 
@@ -29,11 +32,60 @@ check_ssh() {
     ssh -o BatchMode=yes -o ConnectTimeout=5 "$1" "exit" 2> /dev/null
 }
 
+generate_php_file() {
+    PHP_FILE=$(cat << "EOF"
+<?php
+
+// Connect to mysql and get the mysql version
+$link = mysqli_connect('localhost', '{{db_user}}', '{{db_pass}}', '{{db_name}}');
+$mysqlVersion = mysqli_get_server_info($link);
+mysqli_close($link);
+
+// Get the server name and version
+preg_match('/^(apache|nginx)\/(\d+\.\d+\.\d+).*/', strtolower($_SERVER['SERVER_SOFTWARE']), $matches);
+$serverJson = isset($matches[1], $matches[2]) ? [ $matches[1] => [ 'name' => $matches[1], 'version' => $matches[2] ] ] : '';
+
+// Get the current WordPress version by reading the wp-includes/version.php file
+$wpVersionFile = file_get_contents(__DIR__ . DIRECTORY_SEPARATOR . 'wp-includes' . DIRECTORY_SEPARATOR .  'version.php');
+preg_match('/\$wp_version = \'(.*)\';/', $wpVersionFile, $matches);
+$wpVersion = isset($matches[1]) ? $matches[1] : '';
+
+header('Content-Type: application/json');
+echo json_encode(array_merge_recursive([
+    'name' => 'Migrated Site',
+    'domain' => '{{domain}}',
+    'path' => '{{path}}',
+    'wpVersion' => $wpVersion,
+    'services' => [
+        'php' => [
+            'name' => 'php',
+            'version' => PHP_VERSION,
+        ],
+        'mysql' => [
+            'name' => 'mysql',
+            'version' => $mysqlVersion,
+        ],
+    ],
+], ['services' => $serverJson]));
+EOF
+    )
+
+    # Replace the database credentials
+    PHP_FILE=$(echo "$PHP_FILE" | sed "s/{{db_name}}/$1/g")
+    PHP_FILE=$(echo "$PHP_FILE" | sed "s/{{db_user}}/$2/g")
+    PHP_FILE=$(echo "$PHP_FILE" | sed "s/{{db_pass}}/$3/g")
+    PHP_FILE=$(echo "$PHP_FILE" | sed "s*{{domain}}*$4*g")
+    PHP_FILE=$(echo "$PHP_FILE" | sed "s*{{path}}*$5*g")
+
+    echo "$PHP_FILE"
+}
+
 # Parse command line options
-while getopts 'c' OPTION
+while getopts 'cu:' OPTION
 do
   case "${OPTION}" in
     c) SSH_COPY_ID=1;;
+    u) PUBLIC_URL="${OPTARG}";;
     *) usage
        exit 1
        ;;
@@ -52,7 +104,7 @@ echo ""
 echo ""
 
 # Assert that all required commands are installed
-REQUIRED_COMMANDS=(ssh rsync zip echo cut grep mkdir mktemp pwd cd)
+REQUIRED_COMMANDS=(ssh rsync zip echo cut grep mkdir mktemp pwd cd curl)
 for COMMAND in "${REQUIRED_COMMANDS[@]}"
 do
     assert_command_exists "$COMMAND"
@@ -121,6 +173,30 @@ rsync -az --info=progress2 -e ssh "$SSH_LOGIN:$PUBLIC_PATH" "$TMP_DIR"
 mkdir "$TMP_DIR/database"
 echo "Copying database"
 ssh "$SSH_LOGIN" "mysqldump --no-tablespaces -u $DB_USER -p$DB_PASSWORD $DB_NAME" 2> /dev/null > "$TMP_DIR/database/$DB_NAME.sql"
+
+# Create a phpinfo file if the -u flag is set
+if [ -n "$PUBLIC_URL" ]; then
+    # Create a random file name
+    FILENAME="migrate-to-localwp-$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1).php"
+
+    # Create a php file locally
+    generate_php_file "$DB_NAME" "$DB_USER" "$DB_PASSWORD" "$PUBLIC_URL" "$PUBLIC_PATH" > "$TMP_DIR/$FILENAME"
+    # Upload the php file to the remote server
+    echo "Uploading php file"
+    rsync -az --info=progress2 -e ssh "$TMP_DIR/$FILENAME" "$SSH_LOGIN:$PUBLIC_PATH/$FILENAME"
+    # Delete the php file locally
+    rm "$TMP_DIR/$FILENAME"
+
+    # Store the JSON output by the info file
+    JSON=$(curl -s "$PUBLIC_URL/$FILENAME")
+
+    # Delete the php file on the remote server
+    ssh "$SSH_LOGIN" "rm $PUBLIC_PATH/$FILENAME"
+
+    # Generate the JSON file
+    echo "Generating JSON file"
+    echo "$JSON" > "$TMP_DIR/migrate-to-localwp.json"
+fi
 
 # Now zip up the temporary directory and place it in the working directory
 WORKDIR=$(pwd)
