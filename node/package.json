@@ -1,0 +1,16 @@
+{
+  "name": "migrate-to-localwp",
+  "version": "0.0.0",
+  "description": "Generate files to be imported by Local (by flywheel) given a sites SFTP/SSH credentials.",
+  "main": "build/index.js",
+  "author": "Justin Fortunato <developer@jfortunato.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/ssh2": "^1.11.8",
+    "typescript": "^5.0.2"
+  },
+  "dependencies": {
+    "commander": "^10.0.0",
+    "ssh2": "^1.11.0"
+  }
+}
